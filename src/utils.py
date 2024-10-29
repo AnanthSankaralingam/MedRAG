@@ -15,6 +15,7 @@ corpus_names = {
     "Wikipedia": ["wikipedia"],
     "MedText": ["textbooks", "statpearls"],
     "MedCorp": ["pubmed", "textbooks", "statpearls", "wikipedia"],
+    "PatientData":["patientdata"],
 }
 
 retriever_names = {
@@ -236,7 +237,14 @@ class RetrievalSystem:
 
     def __init__(self, retriever_name="MedCPT", corpus_name="Textbooks", db_dir="./corpus", HNSW=False, cache=False):
         self.retriever_name = retriever_name
+        
+        self.db_dir = db_dir
         self.corpus_name = corpus_name
+        self.documents = []  # Store documents in memory 
+
+        if corpus_name == "PatientData":
+            self.load_patient_data()
+            
         assert self.corpus_name in corpus_names
         assert self.retriever_name in retriever_names
         self.retrievers = []
@@ -249,35 +257,55 @@ class RetrievalSystem:
             self.docExt = DocExtracter(cache=True, corpus_name=self.corpus_name, db_dir=db_dir)
         else:
             self.docExt = None
-    
+
+    def load_patient_data(self):
+        # Assuming `patient_data.jsonl` is located in `db_dir`
+        data_path = os.path.join(self.db_dir, "patient_data.jsonl")
+        with open(data_path, 'r') as f:
+            for line in f:
+                doc = json.loads(line)
+                # Ensure each doc has 'title' and 'content' fields
+                if "title" in doc and "content" in doc:
+                    self.documents.append(doc)
+                else:
+                    print(f"Skipping entry due to missing fields: {doc}")
+                    
     def retrieve(self, question, k=32, rrf_k=100, id_only=False):
         '''
-            Given questions, return the relevant snippets from the corpus
+            Given questions, return the relevant snippets from the corpus. MODIFIED FOR PATIENT DATA SANITY CHECK
         '''
         assert type(question) == str
+        
+        retrieved_docs = []
+        for doc in self.documents:
+            if query.lower() in doc["content"].lower():
+                retrieved_docs.append(doc)
+                if len(retrieved_docs) >= k:
+                    break
+        return retrieved_docs, [1] * len(retrieved_docs)  # Placeholder scores
+        
+        # output_id_only = id_only
+        # if self.cache:
+        #     id_only = True
 
-        output_id_only = id_only
-        if self.cache:
-            id_only = True
+        # texts = []
+        # scores = []
 
-        texts = []
-        scores = []
-
-        if "RRF" in self.retriever_name:
-            k_ = max(k * 2, 100)
-        else:
-            k_ = k
-        for i in range(len(retriever_names[self.retriever_name])):
-            texts.append([])
-            scores.append([])
-            for j in range(len(corpus_names[self.corpus_name])):
-                t, s = self.retrievers[i][j].get_relevant_documents(question, k=k_, id_only=id_only)
-                texts[-1].append(t)
-                scores[-1].append(s)
-        texts, scores = self.merge(texts, scores, k=k, rrf_k=rrf_k)
-        if self.cache:
-            texts = self.docExt.extract(texts)
-        return texts, scores
+        # if "RRF" in self.retriever_name:
+        #     k_ = max(k * 2, 100)
+        # else:
+        #     k_ = k
+        # for i in range(len(retriever_names[self.retriever_name])):
+        #     texts.append([])
+        #     scores.append([])
+        #     for j in range(len(corpus_names[self.corpus_name])):
+        #         t, s = self.retrievers[i][j].get_relevant_documents(question, k=k_, id_only=id_only)
+        #         texts[-1].append(t)
+        #         scores[-1].append(s)
+        # texts, scores = self.merge(texts, scores, k=k, rrf_k=rrf_k)
+        # if self.cache:
+        #     texts = self.docExt.extract(texts)
+        # return texts, scores
 
     def merge(self, texts, scores, k=32, rrf_k=100):
         '''
